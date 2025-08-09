@@ -1,9 +1,8 @@
-module github.com/kyoso109/xk6-socks-proxy
+module github.com/kyos0109/xk6-socks-proxy
 
 go 1.24.6
 
 require (
-	github.com/kyos0109/xk6-socks-proxy v0.0.0-20250808155944-823baabf8ee5
 	go.k6.io/k6 v1.1.0
 	golang.org/x/net v0.43.0
 )
