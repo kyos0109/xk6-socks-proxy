@@ -1,0 +1,17 @@
+# Supported protocols: socks4, socks4a, socks5, socks5h, http, https
+# Format: <protocol>://<host>:<port>
+# One proxy per line, comma-separated format is not supported
+# Lines starting with # are comments
+
+# SOCKS5 proxy (DNS resolved by proxy)
+socks5h://your-proxy-host-1:1080
+socks5://your-proxy-host-2:1080
+
+# SOCKS4 proxy
+socks4://your-proxy-host-3:1080
+
+# HTTP proxy
+http://your-proxy-host-4:8080
+
+# HTTPS proxy (HTTP CONNECT)
+https://your-proxy-host-5:8443
