@@ -2,6 +2,8 @@
 
 This extension adds SOCKS/HTTP proxy support, proxy rotation, unhealthy proxy caching, gzip, auto-Referer, redirect control, HTTP/2 toggle, and random User-Agent selection to k6 via a small JS API.
 
+Now supports **body discard** and **skip decompress** features for improved performance and memory usage. See below for details.
+
 ## Build (with xk6)
 
 ```bash
@@ -35,6 +37,8 @@ The command above produces a custom `k6` binary that includes this module.
     "autoReferer": true,             // set Referer to request URL when not provided
     "followRedirects": true,         // follow redirects or return 3xx
     "acceptGzip": true,              // add Accept-Encoding: gzip
+    "discardBody": false,            // discard response body (do not return it) [default: false]
+    "skipDecompress": false,         // skip gzip/deflate decompression [default: false]
     "randomUserAgent": false,        // pick UA from userAgents list when true
     "userAgentListPath": "./user_agents.txt", // file with one UA per line
     "headers": {                     // default headers (merged per request)
@@ -64,7 +68,9 @@ The command above produces a custom `k6` binary that includes this module.
     "disableHTTP2": false,
     "autoReferer": true,
     "followRedirects": true,
-    "acceptGzip": true
+    "acceptGzip": true,
+    "discardBody": false,            // discard response body (do not return it) [default: false]
+    "skipDecompress": false          // skip gzip/deflate decompression [default: false]
   },
   "proxy": {                          // optional per-request overrides
     "url": "",                       // single proxy URL
@@ -72,12 +78,51 @@ The command above produces a custom `k6` binary that includes this module.
     "disable": false
   }
 }
+
+```
+## Body discard / Skip decompress
+
+This module supports two features for optimizing resource usage during high-throughput or large-response testing:
+
+- **discardBody**: When set to `true`, the response body will not be returned to JS (i.e., `res.body` will be empty). This saves memory and reduces GC pressure, especially when downloading large or irrelevant bodies (e.g., images, videos, or when only status codes/headers matter).
+- **skipDecompress**: When set to `true`, the proxy will not attempt to decompress gzip/deflate-compressed responses, even if the server sends them compressed. The raw (compressed) bytes will be returned as-is in `res.body`. This saves CPU cycles otherwise spent on decompression, and is useful when you do not need to inspect or parse the body content.
+
+You can set these options globally in `configure()` or per-request:
+
+```js
+import socks from 'k6/x/xk6-socks-proxy';
+
+socks.configure({
+  http: {
+    discardBody: true,      // discard all response bodies by default
+    skipDecompress: false,  // still decompress if compressed
+  }
+});
+
+export default function () {
+  // Override per request: skip decompress but keep body
+  const res = socks.request({
+    url: 'https://example.com/largefile.gz',
+    http: {
+      discardBody: false,
+      skipDecompress: true,
+    }
+  });
+  // res.body will contain the raw compressed data (or be empty if discardBody is true)
+}
 ```
 
-The response returned to JS is an object:
+**Performance tips:**
+- Use `discardBody: true` when you only care about status codes, headers, or side effects (not the content).
+- Use `skipDecompress: true` to reduce CPU usage if you do not need to parse or check the decompressed body.
+- Both options can help when testing endpoints with large or highly-compressed responses.
+
+
 ```jsonc
+The response returned to JS is an object:
 { "status": 200, "body": "...", "error": "" }
 ```
+> **Note:** The `body` field is returned as a `[]byte` (raw byte slice), not a string, by default. This means it may contain binary data and is not automatically decoded or converted to a string. If you need a string, you can convert it in your test script as appropriate.
 
 ## Proxy list format (`proxies.txt`)
 
