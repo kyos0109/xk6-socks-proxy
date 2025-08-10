@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.k6.io/k6/js/modules"
@@ -119,20 +120,19 @@ type Response struct {
 
 // Client implements the k6/x/sockshttp module
 type Client struct {
-	clients        sync.Map // map[string]*http.Client
-	badProxies     sync.Map // map[string]time.Time
-	proxyList      []string
-	proxyIndex     int
-	proxyListLock  sync.RWMutex
+	clients        sync.Map     // map[string]*http.Client
+	badProxies     sync.Map     // map[string]time.Time
+	proxyListVal   atomic.Value // holds []string
+	proxyRR        atomic.Uint64
 	proxyListPath  string
 	proxyListMTime time.Time
 	badProxyTTL    time.Duration
 	defaultHTTP    HTTPOptions
 	defaultProxy   ProxyOptions
 
-	// user-agent list cache
-	userAgents  []string
-	uaLock      sync.RWMutex
+	// user-agent list cache (atomic/modern fields)
+	uaListVal   atomic.Value // holds []string
+	uaRR        atomic.Uint64
 	uaListPath  string
 	uaListMTime time.Time
 }
