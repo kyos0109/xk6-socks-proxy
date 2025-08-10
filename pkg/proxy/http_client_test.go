@@ -52,3 +52,19 @@ func TestGetClient_GivenTimeout_WhenCreate_ThenApplied(t *testing.T) {
 		t.Fatalf("unexpected transport type: %T", cli.Transport)
 	}
 }
+
+func TestSkipDecompressFlag(t *testing.T) {
+	c := &Client{}
+	client, _ := c.getClientWithOpts("", 5*time.Second, false, false, true, true) // skipDecompress=true
+
+	tr := client.Transport.(*http.Transport)
+	if !tr.DisableCompression {
+		t.Errorf("Expected DisableCompression=true, got %v", tr.DisableCompression)
+	}
+
+	client2, _ := c.getClientWithOpts("", 5*time.Second, false, false, true, false) // skipDecompress=false
+	tr2 := client2.Transport.(*http.Transport)
+	if tr2.DisableCompression {
+		t.Errorf("Expected DisableCompression=false, got %v", tr2.DisableCompression)
+	}
+}
