@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -292,5 +293,47 @@ func TestDecodeProxyOptions_GivenMap_WhenDecode_ThenStructFilled(t *testing.T) {
 	decodeProxyOptions(m, &dst)
 	if dst.URL != "socks5://host:1080" || dst.ListPath != "./p.txt" || !dst.Disable {
 		t.Fatalf("ProxyOptions fields not set correctly: %+v", dst)
+	}
+}
+
+// Given a text file containing normal lines, empty lines, and comments
+// When readLines is called
+// Then it should return only trimmed non-comment lines, preserve modification time, and error on missing file
+func TestReadLines(t *testing.T) {
+	t.Parallel()
+
+	tmpFile, err := os.CreateTemp("", "readlines_test_*.txt")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := `# comment line
+line1
+line2
+
+  line3  
+# another comment
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	lines, modTime, err := readLines(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("readLines failed: %v", err)
+	}
+	want := []string{"line1", "line2", "line3"}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("unexpected lines: got=%v want=%v", lines, want)
+	}
+	if modTime.IsZero() {
+		t.Fatalf("modTime should not be zero")
+	}
+
+	_, _, err = readLines("non_existent_file.txt")
+	if err == nil {
+		t.Fatalf("expected error for non-existent file")
 	}
 }

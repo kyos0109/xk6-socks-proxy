@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+func writeProxiesFile(t *testing.T, dir string, lines []string) string {
+	t.Helper()
+	path := filepath.Join(dir, "proxies.txt")
+	data := ""
+	for _, l := range lines {
+		data += l + "\n"
+	}
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write proxies: %v", err)
+	}
+	return path
+}
+
 // Given a proxies file
 // When LoadProxyList is called
 // Then it loads valid entries
@@ -24,8 +37,13 @@ socks5h://p3:1080
 	if err := c.LoadProxyList(path); err != nil {
 		t.Fatalf("LoadProxyList: %v", err)
 	}
-	if got := len(c.proxyList); got != 3 {
-		t.Fatalf("len=%d want 3", got)
+	// verify by rotating through the list via public API
+	s := map[string]bool{}
+	s[c.GetNextProxy()] = true
+	s[c.GetNextProxy()] = true
+	s[c.GetNextProxy()] = true
+	if len(s) != 3 {
+		t.Fatalf("unique proxies=%d want 3", len(s))
 	}
 }
 
@@ -33,7 +51,13 @@ socks5h://p3:1080
 // When GetNextProxy called 4 times
 // Then it wraps to the first
 func TestGetNextProxy_GivenRotation_WhenWrap_ThenFirstAgain(t *testing.T) {
-	c := &Client{proxyList: []string{"p1", "p2", "p3"}}
+	c := &Client{}
+	dir := t.TempDir()
+	path := writeProxiesFile(t, dir, []string{"p1", "p2", "p3"})
+	if err := c.LoadProxyList(path); err != nil {
+		t.Fatalf("LoadProxyList: %v", err)
+	}
+
 	p1 := c.GetNextProxy()
 	p2 := c.GetNextProxy()
 	p3 := c.GetNextProxy()
@@ -50,10 +74,13 @@ func TestGetNextProxy_GivenRotation_WhenWrap_ThenFirstAgain(t *testing.T) {
 // When markBadProxy called
 // Then GetNextProxy skips it during TTL
 func TestBadProxyCache_GivenTTL_WhenMarkedBad_ThenSkipped(t *testing.T) {
-	c := &Client{
-		proxyList:   []string{"a", "b", "c"},
-		badProxyTTL: 150 * time.Millisecond,
+	c := &Client{badProxyTTL: 150 * time.Millisecond}
+	dir := t.TempDir()
+	path := writeProxiesFile(t, dir, []string{"a", "b", "c"})
+	if err := c.LoadProxyList(path); err != nil {
+		t.Fatalf("LoadProxyList: %v", err)
 	}
+
 	c.markBadProxy("b")
 	seen := map[string]bool{}
 	for i := 0; i < 6; i++ {
@@ -68,10 +95,13 @@ func TestBadProxyCache_GivenTTL_WhenMarkedBad_ThenSkipped(t *testing.T) {
 // When TTL elapses
 // Then it is retried again
 func TestBadProxyCache_GivenTTLExpired_WhenNext_ThenRetried(t *testing.T) {
-	c := &Client{
-		proxyList:   []string{"a", "b", "c"},
-		badProxyTTL: 50 * time.Millisecond,
+	c := &Client{badProxyTTL: 50 * time.Millisecond}
+	dir := t.TempDir()
+	path := writeProxiesFile(t, dir, []string{"a", "b", "c"})
+	if err := c.LoadProxyList(path); err != nil {
+		t.Fatalf("LoadProxyList: %v", err)
 	}
+
 	c.markBadProxy("b")
 	time.Sleep(c.badProxyTTL + 10*time.Millisecond)
 

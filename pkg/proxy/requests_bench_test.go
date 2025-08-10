@@ -35,7 +35,8 @@ func BenchmarkBuildRequest_SimpleGET(b *testing.B) {
 
 // Benchmark buildRequest with a POST body and multiple headers.
 func BenchmarkBuildRequest_PostWithBodyAndHeaders(b *testing.B) {
-	c := &Client{userAgents: []string{"UA/1.0"}}
+	c := &Client{}
+	c.uaListVal.Store([]string{"UA/1.0"})
 	bigHeaders := map[string]string{
 		"Content-Type": "application/json",
 		"X-H1":         "v1",

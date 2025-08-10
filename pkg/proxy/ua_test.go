@@ -26,10 +26,12 @@ UA-2
 	if err := c.LoadUserAgents(path); err != nil {
 		t.Fatalf("LoadUserAgents: %v", err)
 	}
-	if got := len(c.userAgents); got != 2 {
+	userAgents := c.uaListVal.Load().([]string)
+	if got := len(userAgents); got != 2 {
 		t.Fatalf("len=%d want 2", got)
 	}
-	if c.uaListMTime.IsZero() {
+	mtime := c.uaListMTime
+	if mtime.IsZero() {
 		t.Fatalf("mtime should be set")
 	}
 }
@@ -39,7 +41,7 @@ UA-2
 // Then it returns non-empty values from the list
 func TestGetRandomUserAgent_GivenLoaded_WhenPick_ThenNonEmpty(t *testing.T) {
 	var c Client
-	c.userAgents = []string{"A", "B", "C"}
+	c.uaListVal.Store([]string{"A", "B", "C"})
 	for i := 0; i < 10; i++ {
 		ua := c.getRandomUserAgent()
 		if ua == "" {
@@ -62,7 +64,8 @@ func TestLoadUserAgents_GivenUnchanged_WhenReload_ThenMtimeUnchanged(t *testing.
 
 	time.Sleep(5 * time.Millisecond)
 	_ = c.LoadUserAgents(path)
-	if !c.uaListMTime.Equal(mt) {
+	newMt := c.uaListMTime
+	if !newMt.Equal(mt) {
 		t.Fatalf("mtime changed unexpectedly")
 	}
 }
