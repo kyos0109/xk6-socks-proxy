@@ -47,10 +47,12 @@ func (c *Client) getClientWithOpts(proxyURL string, timeout time.Duration, insec
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: insecure},
 		DisableKeepAlives:   false,
 		ForceAttemptHTTP2:   !disableH2,
-		MaxIdleConns:        1000,
-		MaxIdleConnsPerHost: 100,
+		MaxIdleConns:        4096,
+		MaxIdleConnsPerHost: 1024,
 		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  skipDecompress,
+		// SkipDecompress=true => Transport.DisableCompression=true (do not auto-decompress)
+		// SkipDecompress=false => Transport.DisableCompression=false (allow auto-decompress)
+		DisableCompression: skipDecompress,
 	}
 
 	if proxyURL != "" {
