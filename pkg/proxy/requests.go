@@ -13,12 +13,17 @@ func (c *Client) buildRequest(params RequestParams) (*http.Request, error) {
 		method = http.MethodGet
 	}
 
+	url := params.URL
+	if params.HTTP.RandomPath {
+		url += c.randomPath(params.HTTP.RandomPathWithQuery)
+	}
+
 	var body io.Reader
 	if !(method == http.MethodGet || method == http.MethodHead) && params.Body != "" {
 		body = strings.NewReader(params.Body)
 	}
 
-	req, err := http.NewRequest(method, params.URL, body)
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +36,7 @@ func (c *Client) buildRequest(params RequestParams) (*http.Request, error) {
 		req.Header.Set(k, v)
 	}
 	if params.HTTP.AutoReferer && !hasRef && params.URL != "" {
-		req.Header.Set("Referer", params.URL)
+		req.Header.Set("Referer", c.getRandomReferer())
 	}
 
 	if params.HTTP.RandomUserAgent && req.Header.Get("User-Agent") == "" {

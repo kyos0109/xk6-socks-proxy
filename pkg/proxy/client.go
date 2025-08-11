@@ -12,17 +12,19 @@ import (
 
 // HTTPOptions defines HTTP-specific options for requests
 type HTTPOptions struct {
-	Timeout            string            `json:"timeout"`
-	InsecureSkipVerify bool              `json:"insecureSkipVerify"`
-	DisableHTTP2       bool              `json:"disableHTTP2"`
-	AutoReferer        bool              `json:"autoReferer"`
-	FollowRedirects    bool              `json:"followRedirects"`
-	AcceptGzip         bool              `json:"acceptGzip"`
-	Headers            map[string]string `json:"headers"`
-	RandomUserAgent    bool              `json:"randomUserAgent"`
-	UserAgentListPath  string            `json:"userAgentListPath"`
-	DiscardBody        bool              `json:"discardBody"`
-	SkipDecompress     bool              `json:"skipDecompress"`
+	Timeout             string            `json:"timeout"`
+	InsecureSkipVerify  bool              `json:"insecureSkipVerify"`
+	DisableHTTP2        bool              `json:"disableHTTP2"`
+	AutoReferer         bool              `json:"autoReferer"`
+	FollowRedirects     bool              `json:"followRedirects"`
+	AcceptGzip          bool              `json:"acceptGzip"`
+	Headers             map[string]string `json:"headers"`
+	RandomUserAgent     bool              `json:"randomUserAgent"`
+	UserAgentListPath   string            `json:"userAgentListPath"`
+	DiscardBody         bool              `json:"discardBody"`
+	SkipDecompress      bool              `json:"skipDecompress"`
+	RandomPathWithQuery bool              `json:"randomPathWithQuery"`
+	RandomPath          bool              `json:"randomPath"`
 
 	// Presence flags (not serialized). True when user explicitly supplied the value in request/script.
 	DiscardBodyProvided    bool `json:"-"`
@@ -87,6 +89,18 @@ func (o *HTTPOptions) ApplyDefaults(def HTTPOptions) {
 	// Paths
 	if o.UserAgentListPath == "" && def.UserAgentListPath != "" {
 		o.UserAgentListPath = def.UserAgentListPath
+	}
+
+	if !o.RandomUserAgent && def.RandomUserAgent {
+		o.RandomUserAgent = false
+	}
+
+	if !o.RandomPath && def.RandomPath {
+		o.RandomPath = false
+	}
+
+	if !o.RandomPathWithQuery && def.RandomPathWithQuery {
+		o.RandomPathWithQuery = false
 	}
 }
 
