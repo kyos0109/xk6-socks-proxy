@@ -136,6 +136,15 @@ type Client struct {
 	uaRand      *rand.Rand
 	uaListPath  string
 	uaListMTime time.Time
+
+	// referer
+	refererListVal   atomic.Value
+	refererListPath  string
+	refererListMTime time.Time
+	refererRand      *rand.Rand
+
+	// random path
+	pathRand *rand.Rand
 }
 
 // New returns a new Client instance
@@ -277,13 +286,17 @@ func (c *Client) Preview(raw any) (any, error) {
 func (c *Client) Exports() modules.Exports {
 	return modules.Exports{
 		Named: map[string]any{
-			"request":            c.Request,
-			"loadProxyList":      c.LoadProxyList,
-			"loadUserAgents":     c.LoadUserAgents,
-			"configure":          c.Configure,
-			"defaultConfig":      c.DefaultConfig,
-			"preview":            c.Preview,
-			"getRandomUserAgent": c.GetRandomUserAgent,
+			"request":                c.Request,
+			"loadProxyList":          c.LoadProxyList,
+			"loadUserAgents":         c.LoadUserAgents,
+			"configure":              c.Configure,
+			"defaultConfig":          c.DefaultConfig,
+			"preview":                c.Preview,
+			"getRandomUserAgent":     c.GetRandomUserAgent,
+			"loadReferers":           c.LoadReferers,
+			"getRandomReferer":       c.GetRandomReferer,
+			"getRandomPath":          c.GetRandomPath,
+			"getRandomPathWithQuery": c.GetRandomPathWithQuery,
 		},
 	}
 }
