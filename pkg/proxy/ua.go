@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"math/rand"
 	"time"
 )
 
@@ -54,6 +55,16 @@ func (c *Client) getRandomUserAgent() string {
 	if len(list) == 0 {
 		return ""
 	}
-	idx := int(c.uaRR.Add(1)-1) % len(list)
+
+	if c.uaRand == nil {
+		c.uaRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+
+	idx := c.uaRand.Intn(len(list))
 	return list[idx]
+}
+
+// GetRandomUserAgent is the public wrapper to get a random UA string for k6 scripts.
+func (c *Client) GetRandomUserAgent() string {
+	return c.getRandomUserAgent()
 }

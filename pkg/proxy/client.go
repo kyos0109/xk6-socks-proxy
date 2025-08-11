@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -132,7 +133,7 @@ type Client struct {
 
 	// user-agent list cache (atomic/modern fields)
 	uaListVal   atomic.Value // holds []string
-	uaRR        atomic.Uint64
+	uaRand      *rand.Rand
 	uaListPath  string
 	uaListMTime time.Time
 }
@@ -276,12 +277,13 @@ func (c *Client) Preview(raw any) (any, error) {
 func (c *Client) Exports() modules.Exports {
 	return modules.Exports{
 		Named: map[string]any{
-			"request":        c.Request,
-			"loadProxyList":  c.LoadProxyList,
-			"loadUserAgents": c.LoadUserAgents,
-			"configure":      c.Configure,
-			"defaultConfig":  c.DefaultConfig,
-			"preview":        c.Preview,
+			"request":            c.Request,
+			"loadProxyList":      c.LoadProxyList,
+			"loadUserAgents":     c.LoadUserAgents,
+			"configure":          c.Configure,
+			"defaultConfig":      c.DefaultConfig,
+			"preview":            c.Preview,
+			"getRandomUserAgent": c.GetRandomUserAgent,
 		},
 	}
 }
