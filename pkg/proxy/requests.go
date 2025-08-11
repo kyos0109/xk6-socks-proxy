@@ -28,15 +28,32 @@ func (c *Client) buildRequest(params RequestParams) (*http.Request, error) {
 		return nil, err
 	}
 
+	// Respect user-provided Referer only if it has a non-empty value; otherwise we may auto-fill.
 	hasRef := false
 	for k, v := range params.HTTP.Headers {
-		if strings.EqualFold(k, "Referer") {
+		if strings.EqualFold(k, "Referer") && strings.TrimSpace(v) != "" {
 			hasRef = true
 		}
 		req.Header.Set(k, v)
 	}
-	if params.HTTP.AutoReferer && !hasRef && params.URL != "" {
-		req.Header.Set("Referer", c.getRandomReferer())
+
+	// Referer (flat decision):
+	// - If user didn't set a non-empty Referer:
+	//   * RandomReferer => try list; if empty and AutoReferer => use URL
+	//   * else if AutoReferer => use URL
+	if !hasRef {
+		var refToSet string
+		if params.HTTP.RandomReferer {
+			refToSet = strings.TrimSpace(c.getRandomReferer())
+			if refToSet == "" && params.HTTP.AutoReferer {
+				refToSet = req.URL.String()
+			}
+		} else if params.HTTP.AutoReferer {
+			refToSet = req.URL.String()
+		}
+		if refToSet != "" {
+			req.Header.Set("Referer", refToSet)
+		}
 	}
 
 	if params.HTTP.RandomUserAgent && req.Header.Get("User-Agent") == "" {

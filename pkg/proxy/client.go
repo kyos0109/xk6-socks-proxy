@@ -16,6 +16,7 @@ type HTTPOptions struct {
 	InsecureSkipVerify  bool              `json:"insecureSkipVerify"`
 	DisableHTTP2        bool              `json:"disableHTTP2"`
 	AutoReferer         bool              `json:"autoReferer"`
+	RandomReferer       bool              `json:"randomReferer"`
 	FollowRedirects     bool              `json:"followRedirects"`
 	AcceptGzip          bool              `json:"acceptGzip"`
 	Headers             map[string]string `json:"headers"`

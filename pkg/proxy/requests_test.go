@@ -6,18 +6,31 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
 
 func defaultTimeout() time.Duration { return 3 * time.Second }
 
-// Given HTTP options Enable gzip & auto referer
+// Given HTTP options Enable gzip & auto referer and a loaded referer list
 // When buildRequest is called
-// Then headers should include Accept-Encoding:gzip and Referer
+// Then headers should NOT explicitly include Accept-Encoding (transport handles it) and SHOULD include a non-empty Referer
 func TestBuildRequest_GivenGzipAutoRef_WhenBuild_ThenHeadersSet(t *testing.T) {
-	c := &Client{}
-	req, err := c.buildRequest(RequestParams{
+	// prepare a referer list so AutoReferer can populate a non-empty value
+	f, err := os.CreateTemp("", "refs-*.txt")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	_, _ = f.WriteString("https://ref.example.com\nhttps://ref2.example.com\n")
+	_ = f.Close()
+
+	autoRefClient := &Client{}
+	if err := autoRefClient.LoadReferers(f.Name()); err != nil {
+		t.Fatalf("LoadReferers: %v", err)
+	}
+
+	req, err := autoRefClient.buildRequest(RequestParams{
 		URL:    "https://example.com/a",
 		Method: "GET",
 		HTTP: HTTPOptions{
@@ -33,7 +46,7 @@ func TestBuildRequest_GivenGzipAutoRef_WhenBuild_ThenHeadersSet(t *testing.T) {
 		t.Fatalf("missing header X-Test")
 	}
 	if req.Header.Get("Referer") == "" {
-		t.Fatalf("AutoReferer expected to set Referer to URL")
+		t.Fatalf("AutoReferer expected to set Referer to non-empty value")
 	}
 	// With the new compression strategy, we do not set Accept-Encoding here; Transport will add it.
 	if ae := req.Header.Get("Accept-Encoding"); ae != "" {
@@ -124,5 +137,28 @@ func TestExecuteRequest_GivenFollow_When302_Then200OK(t *testing.T) {
 	}
 	if resp.Status != 200 || string(resp.Body) != "OK" {
 		t.Fatalf("status=%d body=%q", resp.Status, string(resp.Body))
+	}
+}
+
+// Given random referer and auto referer enabled with random path disabled
+// When buildRequest is called
+// Then the Referer header should equal the request URL (deterministic)
+func TestBuildRequest_GivenRandomEmptyAndAuto_WhenBuild_ThenRefererIsURL(t *testing.T) {
+	c := &Client{}
+	req, err := c.buildRequest(RequestParams{
+		URL:    "https://example.com/test",
+		Method: "GET",
+		HTTP: HTTPOptions{
+			RandomReferer:       true,
+			AutoReferer:         true,
+			RandomPath:          false, // disable random path to keep Referer == URL deterministic
+			RandomPathWithQuery: false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest: %v", err)
+	}
+	if req.Header.Get("Referer") != "https://example.com/test" {
+		t.Fatalf("expected Referer to equal URL, got %q", req.Header.Get("Referer"))
 	}
 }
