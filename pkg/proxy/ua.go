@@ -1,62 +1,70 @@
 package proxy
 
 import (
-	"fmt"
-	"os"
-	"strings"
-	"sync/atomic"
+	"math/rand"
+	"time"
 )
 
-// LoadUserAgents loads UA list from file (one per line) with mtime caching
-func (c *Client) LoadUserAgents(path string) error {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("failed to stat ua list: %w", err)
+// getUASlice returns the current user-agent list snapshot; nil if unset.
+// It reads from atomic.Value so it's lock-free for readers.
+func (c *Client) getUASlice() []string {
+	v := c.uaListVal.Load()
+	if v == nil {
+		return nil
 	}
-	c.uaLock.RLock()
-	samePath := (c.uaListPath == path)
-	sameTime := (samePath && !fi.ModTime().After(c.uaListMTime))
-	c.uaLock.RUnlock()
-	if sameTime {
-		return nil // no change
+	if s, ok := v.([]string); ok {
+		return s
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("failed to read ua list: %w", err)
-	}
-	lines := strings.Split(string(data), "\n")
-	var agents []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "#") {
-			agents = append(agents, line)
-		}
-	}
-	if len(agents) == 0 {
-		return fmt.Errorf("ua list is empty")
-	}
-
-	c.uaLock.Lock()
-	c.userAgents = agents
-	c.uaListPath = path
-	c.uaListMTime = fi.ModTime()
-	c.uaLock.Unlock()
 	return nil
 }
 
-var uaSeq uint64
+// LoadUserAgents loads user agents from a file into an atomic snapshot.
+// It ignores empty lines and lines starting with '#'. If the file path is empty,
+// it clears the UA list. It also compares mtime to avoid unnecessary reloads.
+func (c *Client) LoadUserAgents(path string) error {
+	if path == "" {
+		// clear list
+		c.uaListVal.Store([]string{})
+		c.uaListPath = ""
+		c.uaListMTime = time.Time{}
+		return nil
+	}
 
+	lines, mtime, err := readLines(path)
+	if err != nil {
+		return err
+	}
+
+	// If same file and not modified, skip reload
+	if c.uaListPath == path && !mtime.After(c.uaListMTime) {
+		return nil
+	}
+
+	// store snapshot atomically (can be empty)
+	c.uaListVal.Store(lines)
+	c.uaListPath = path
+	c.uaListMTime = mtime
+
+	return nil
+}
+
+// getRandomUserAgent returns a UA using lock-free round-robin over the current list.
+// It returns an empty string if the list is empty or unset.
 func (c *Client) getRandomUserAgent() string {
-	c.uaLock.RLock()
-	n := len(c.userAgents)
-	c.uaLock.RUnlock()
-	if n == 0 {
+	list := c.getUASlice()
+	if len(list) == 0 {
 		return ""
 	}
-	idx := int(atomic.AddUint64(&uaSeq, 1)-1) % n
-	c.uaLock.RLock()
-	ua := c.userAgents[idx]
-	c.uaLock.RUnlock()
-	return ua
+
+	if c.uaRand == nil {
+		c.uaRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+
+	idx := c.uaRand.Intn(len(list))
+	return list[idx]
+}
+
+// GetRandomUserAgent is the public wrapper to get a random UA string for k6 scripts.
+func (c *Client) GetRandomUserAgent() string {
+	return c.getRandomUserAgent()
 }

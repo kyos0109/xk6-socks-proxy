@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"fmt"
+	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.k6.io/k6/js/modules"
@@ -10,15 +12,24 @@ import (
 
 // HTTPOptions defines HTTP-specific options for requests
 type HTTPOptions struct {
-	Timeout            string            `json:"timeout"`
-	InsecureSkipVerify bool              `json:"insecureSkipVerify"`
-	DisableHTTP2       bool              `json:"disableHTTP2"`
-	AutoReferer        bool              `json:"autoReferer"`
-	FollowRedirects    bool              `json:"followRedirects"`
-	AcceptGzip         bool              `json:"acceptGzip"`
-	Headers            map[string]string `json:"headers"`
-	RandomUserAgent    bool              `json:"randomUserAgent"`
-	UserAgentListPath  string            `json:"userAgentListPath"`
+	Timeout             string            `json:"timeout"`
+	InsecureSkipVerify  bool              `json:"insecureSkipVerify"`
+	DisableHTTP2        bool              `json:"disableHTTP2"`
+	AutoReferer         bool              `json:"autoReferer"`
+	RandomReferer       bool              `json:"randomReferer"`
+	FollowRedirects     bool              `json:"followRedirects"`
+	AcceptGzip          bool              `json:"acceptGzip"`
+	Headers             map[string]string `json:"headers"`
+	RandomUserAgent     bool              `json:"randomUserAgent"`
+	UserAgentListPath   string            `json:"userAgentListPath"`
+	DiscardBody         bool              `json:"discardBody"`
+	SkipDecompress      bool              `json:"skipDecompress"`
+	RandomPathWithQuery bool              `json:"randomPathWithQuery"`
+	RandomPath          bool              `json:"randomPath"`
+
+	// Presence flags (not serialized). True when user explicitly supplied the value in request/script.
+	DiscardBodyProvided    bool `json:"-"`
+	SkipDecompressProvided bool `json:"-"`
 }
 
 // ProxyOptions defines proxy-specific options for requests
@@ -28,37 +39,69 @@ type ProxyOptions struct {
 	Disable  bool   `json:"disable"`
 }
 
-// ApplyDefaults fills zero-values from a default HTTPOptions
+// ApplyDefaults fills zero-values from a default HTTPOptions in a predictable way.
+// Strings adopt defaults when empty; booleans adopt defaults only when the user did not explicitly provide them.
 func (o *HTTPOptions) ApplyDefaults(def HTTPOptions) {
+	// Strings
 	if o.Timeout == "" && def.Timeout != "" {
 		o.Timeout = def.Timeout
 	}
-	if !o.InsecureSkipVerify {
-		o.InsecureSkipVerify = def.InsecureSkipVerify
+
+	// Booleans without presence tracking: only adopt default when it's true and current is false.
+	if !o.InsecureSkipVerify && def.InsecureSkipVerify {
+		o.InsecureSkipVerify = true
 	}
-	if !o.DisableHTTP2 {
-		o.DisableHTTP2 = def.DisableHTTP2
+	if !o.DisableHTTP2 && def.DisableHTTP2 {
+		o.DisableHTTP2 = true
 	}
-	if !o.AutoReferer {
-		o.AutoReferer = def.AutoReferer
+	if !o.AutoReferer && def.AutoReferer {
+		o.AutoReferer = true
 	}
-	if !o.FollowRedirects {
-		o.FollowRedirects = def.FollowRedirects
+	if !o.FollowRedirects && def.FollowRedirects {
+		o.FollowRedirects = true
 	}
-	if !o.AcceptGzip {
-		o.AcceptGzip = def.AcceptGzip
-	}
-	if len(o.Headers) == 0 && len(def.Headers) > 0 {
-		o.Headers = map[string]string{}
-		for k, v := range def.Headers {
-			o.Headers[k] = v
-		}
+	if !o.AcceptGzip && def.AcceptGzip {
+		o.AcceptGzip = true
 	}
 	if !o.RandomUserAgent && def.RandomUserAgent {
 		o.RandomUserAgent = true
 	}
+
+	// Booleans with presence tracking: use defaults only when not explicitly provided by the user.
+	if !o.DiscardBodyProvided {
+		o.DiscardBody = def.DiscardBody
+	}
+	if !o.SkipDecompressProvided {
+		o.SkipDecompress = def.SkipDecompress
+	}
+
+	// Headers: merge defaults without overwriting user-provided keys.
+	if len(def.Headers) > 0 {
+		if o.Headers == nil {
+			o.Headers = map[string]string{}
+		}
+		for k, v := range def.Headers {
+			if _, exists := o.Headers[k]; !exists {
+				o.Headers[k] = v
+			}
+		}
+	}
+
+	// Paths
 	if o.UserAgentListPath == "" && def.UserAgentListPath != "" {
 		o.UserAgentListPath = def.UserAgentListPath
+	}
+
+	if !o.RandomUserAgent && def.RandomUserAgent {
+		o.RandomUserAgent = false
+	}
+
+	if !o.RandomPath && def.RandomPath {
+		o.RandomPath = false
+	}
+
+	if !o.RandomPathWithQuery && def.RandomPathWithQuery {
+		o.RandomPathWithQuery = false
 	}
 }
 
@@ -87,33 +130,46 @@ type RequestParams struct {
 // Response defines the output returned to JS
 type Response struct {
 	Status int    `json:"status"`
-	Body   string `json:"body"`
+	Body   []byte `json:"body"`
 	Error  string `json:"error,omitempty"`
 }
 
 // Client implements the k6/x/sockshttp module
 type Client struct {
-	clients        sync.Map // map[string]*http.Client
-	badProxies     sync.Map // map[string]time.Time
-	proxyList      []string
-	proxyIndex     int
-	proxyListLock  sync.RWMutex
+	clients        sync.Map     // map[string]*http.Client
+	badProxies     sync.Map     // map[string]time.Time
+	proxyListVal   atomic.Value // holds []string
+	proxyRR        atomic.Uint64
 	proxyListPath  string
 	proxyListMTime time.Time
 	badProxyTTL    time.Duration
 	defaultHTTP    HTTPOptions
 	defaultProxy   ProxyOptions
 
-	// user-agent list cache
-	userAgents  []string
-	uaLock      sync.RWMutex
+	// user-agent list cache (atomic/modern fields)
+	uaListVal   atomic.Value // holds []string
+	uaRand      *rand.Rand
 	uaListPath  string
 	uaListMTime time.Time
+
+	// referer
+	refererListVal   atomic.Value
+	refererListPath  string
+	refererListMTime time.Time
+	refererRand      *rand.Rand
+
+	// random path
+	pathRand *rand.Rand
 }
 
 // New returns a new Client instance
 func New() modules.Instance {
-	return &Client{badProxyTTL: 5 * time.Minute}
+	return &Client{
+		badProxyTTL:     5 * time.Minute,
+		uaListPath:      "./user_agents.txt",
+		refererListPath: "./referer.txt",
+		proxyListPath:   "./proxies.txt",
+	}
 }
 
 func (c *Client) parseRequest(raw any) (RequestParams, error) {
@@ -143,6 +199,13 @@ func (c *Client) parseRequest(raw any) (RequestParams, error) {
 	// nested decode (single path)
 	if hv, ok := m["http"]; ok {
 		if hm, ok := hv.(map[string]any); ok {
+			// Remember presence so explicit false won't be overwritten by defaults
+			if _, exists := hm["discardBody"]; exists {
+				r.HTTP.DiscardBodyProvided = true
+			}
+			if _, exists := hm["skipDecompress"]; exists {
+				r.HTTP.SkipDecompressProvided = true
+			}
 			decodeHTTPOptions(hm, &r.HTTP)
 		}
 	}
@@ -169,6 +232,18 @@ func (c *Client) Request(raw any) (any, error) {
 		params.Proxy.ListPath = ""
 	}
 
+	if params.HTTP.RandomUserAgent && params.HTTP.UserAgentListPath == "" {
+		params.HTTP.UserAgentListPath = c.uaListPath
+	}
+
+	if params.HTTP.RandomReferer && params.HTTP.UserAgentListPath == "" && c.refererListPath != "" {
+		params.HTTP.UserAgentListPath = c.refererListPath
+	}
+
+	if (params.HTTP.RandomPath || params.HTTP.RandomPathWithQuery) && params.Proxy.ListPath == "" {
+		params.Proxy.ListPath = c.proxyListPath
+	}
+
 	if params.Proxy.URL == "" && params.Proxy.ListPath != "" {
 		_ = c.LoadProxyList(params.Proxy.ListPath)
 		params.Proxy.URL = c.GetNextProxy()
@@ -193,7 +268,14 @@ func (c *Client) Request(raw any) (any, error) {
 		timeout = d
 	}
 
-	client, err := c.getClient(params.Proxy.URL, timeout, params.HTTP.InsecureSkipVerify, params.HTTP.DisableHTTP2, params.HTTP.FollowRedirects)
+	client, err := c.getClientWithOpts(
+		params.Proxy.URL,
+		timeout,
+		params.HTTP.InsecureSkipVerify,
+		params.HTTP.DisableHTTP2,
+		params.HTTP.FollowRedirects,
+		params.HTTP.SkipDecompress,
+	)
 	if err != nil {
 		if params.Proxy.URL != "" {
 			c.markBadProxy(params.Proxy.URL)
@@ -206,7 +288,7 @@ func (c *Client) Request(raw any) (any, error) {
 		return Response{Error: err.Error()}, nil
 	}
 
-	resp, err := c.executeRequest(client, req, params.Proxy.URL)
+	resp, err := c.executeRequestWithOpts(client, req, params.Proxy.URL, params.HTTP)
 	if err != nil {
 		if params.Proxy.URL != "" {
 			c.markBadProxy(params.Proxy.URL)
@@ -216,13 +298,37 @@ func (c *Client) Request(raw any) (any, error) {
 	return *resp, nil
 }
 
+func (c *Client) DefaultConfig() (any, error) {
+	return map[string]any{
+		"http":  c.defaultHTTP,
+		"proxy": c.defaultProxy,
+	}, nil
+}
+
+func (c *Client) Preview(raw any) (any, error) {
+	params, err := c.parseRequest(raw)
+	if err != nil {
+		return nil, err
+	}
+	params.HTTP.ApplyDefaults(c.defaultHTTP)
+	params.Proxy.ApplyDefaults(c.defaultProxy)
+	return params, nil
+}
+
 func (c *Client) Exports() modules.Exports {
 	return modules.Exports{
 		Named: map[string]any{
-			"request":        c.Request,
-			"loadProxyList":  c.LoadProxyList,
-			"loadUserAgents": c.LoadUserAgents,
-			"configure":      c.Configure,
+			"request":                c.Request,
+			"loadProxyList":          c.LoadProxyList,
+			"loadUserAgents":         c.LoadUserAgents,
+			"configure":              c.Configure,
+			"defaultConfig":          c.DefaultConfig,
+			"preview":                c.Preview,
+			"getRandomUserAgent":     c.GetRandomUserAgent,
+			"loadReferers":           c.LoadReferers,
+			"getRandomReferer":       c.GetRandomReferer,
+			"getRandomPath":          c.GetRandomPath,
+			"getRandomPathWithQuery": c.GetRandomPathWithQuery,
 		},
 	}
 }

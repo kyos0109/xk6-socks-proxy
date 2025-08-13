@@ -2,6 +2,8 @@
 
 This extension adds SOCKS/HTTP proxy support, proxy rotation, unhealthy proxy caching, gzip, auto-Referer, redirect control, HTTP/2 toggle, and random User-Agent selection to k6 via a small JS API.
 
+Now supports **body discard**, **skip decompress**, **random path**, and **random referer** features for improved performance, memory usage, and request variability. See below for details.
+
 ## Build (with xk6)
 
 ```bash
@@ -35,15 +37,20 @@ The command above produces a custom `k6` binary that includes this module.
     "autoReferer": true,             // set Referer to request URL when not provided
     "followRedirects": true,         // follow redirects or return 3xx
     "acceptGzip": true,              // add Accept-Encoding: gzip
+    "discardBody": false,            // discard response body (do not return it) [default: false]
+    "skipDecompress": false,         // skip gzip/deflate decompression [default: false]
     "randomUserAgent": false,        // pick UA from userAgents list when true
-    "userAgentListPath": "./user_agents.txt", // file with one UA per line
+    "randomPath": false,             // generate a random URL path and optional query string per request [default: false]
+    "randomReferer": false,          // pick Referer randomly from referer list file when true
+    "userAgentListPath": "./user_agents.txt", // file with one UA per line (default if randomUserAgent is true)
+    "refererListPath": "./referer.txt",       // file with one Referer URL per line (default if randomReferer is true)
     "headers": {                     // default headers (merged per request)
       "Accept": "*/*"
     }
   },
   "proxy": {
     "url": "",                      // single proxy URL (e.g. socks5h://user:pass@host:1080)
-    "listPath": "./proxies.txt",    // path to proxy list file (one per line)
+    "listPath": "./proxies.txt",    // path to proxy list file (one per line) (default if proxy rotation enabled)
     "disable": false                 // disable all proxy usage when true
   }
 }
@@ -58,13 +65,18 @@ The command above produces a custom `k6` binary that includes this module.
   "http": {                           // optional per-request overrides
     "headers": { "X-Debug": "1" },
     "randomUserAgent": true,
+    "randomPath": false,
+    "randomReferer": false,
     "userAgentListPath": "./user_agents.txt",
+    "refererListPath": "./referer.txt",
     "timeout": "10s",
     "insecureSkipVerify": false,
     "disableHTTP2": false,
     "autoReferer": true,
     "followRedirects": true,
-    "acceptGzip": true
+    "acceptGzip": true,
+    "discardBody": false,            // discard response body (do not return it) [default: false]
+    "skipDecompress": false          // skip gzip/deflate decompression [default: false]
   },
   "proxy": {                          // optional per-request overrides
     "url": "",                       // single proxy URL
@@ -74,10 +86,67 @@ The command above produces a custom `k6` binary that includes this module.
 }
 ```
 
-The response returned to JS is an object:
+## Body discard / Skip decompress
+
+This module supports two features for optimizing resource usage during high-throughput or large-response testing:
+
+- **discardBody**: When set to `true`, the response body will not be returned to JS (i.e., `res.body` will be empty). This saves memory and reduces GC pressure, especially when downloading large or irrelevant bodies (e.g., images, videos, or when only status codes/headers matter).
+- **skipDecompress**: When set to `true`, the proxy will not attempt to decompress gzip/deflate-compressed responses, even if the server sends them compressed. The raw (compressed) bytes will be returned as-is in `res.body`. This saves CPU cycles otherwise spent on decompression, and is useful when you do not need to inspect or parse the body content.
+
+You can set these options globally in `configure()` or per-request:
+
+```js
+import socks from 'k6/x/xk6-socks-proxy';
+
+socks.configure({
+  http: {
+    discardBody: true,      // discard all response bodies by default
+    skipDecompress: false,  // still decompress if compressed
+  }
+});
+
+export default function () {
+  // Override per request: skip decompress but keep body
+  const res = socks.request({
+    url: 'https://example.com/largefile.gz',
+    http: {
+      discardBody: false,
+      skipDecompress: true,
+    }
+  });
+  // res.body will contain the raw compressed data (or be empty if discardBody is true)
+}
+```
+
+**Performance tips:**
+- Use `discardBody: true` when you only care about status codes, headers, or side effects (not the content).
+- Use `skipDecompress: true` to reduce CPU usage if you do not need to parse or check the decompressed body.
+- Both options can help when testing endpoints with large or highly-compressed responses.
+
+## Random Path / Referer
+
+- **randomPath**: When enabled (`true`), a random URL path is generated automatically for each request if no path is provided in the URL. This random path may include an optional query string with random key-value pairs. This feature does not require any external file and defaults to `false`.
+- **randomReferer**: When enabled (`true`), a random Referer header is selected from a user-provided list file (`refererListPath`). The list file should contain one full URL or referer string per line. The default path for this file is `./referer.txt` if the file exists and no custom path is provided. This allows for randomized Referer headers to simulate more realistic browsing behavior.
+
+## Default list paths
+
+When enabling randomUserAgent, randomReferer, or proxy list rotation without specifying paths, the module defaults to:
+
+- `userAgentListPath`: `./user_agents.txt`
+- `refererListPath`: `./referer.txt`
+- `listPath` (proxy list): `./proxies.txt`
+
+These files should contain one entry per line and support comments starting with `#`.
+
+## URL Referer support
+
+The `randomReferer` list supports full URLs as referers, allowing you to specify any valid URL string per line in the referer list file.
+
 ```jsonc
+The response returned to JS is an object:
 { "status": 200, "body": "...", "error": "" }
 ```
+> **Note:** The `body` field is returned as a `[]byte` (raw byte slice), not a string, by default. This means it may contain binary data and is not automatically decoded or converted to a string. If you need a string, you can convert it in your test script as appropriate.
 
 ## Proxy list format (`proxies.txt`)
 
@@ -106,6 +175,18 @@ https://your-proxy-host-4:8443
 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
 Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15
 Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0
+```
+
+## Referer list format (`referer.txt`)
+
+- One referer string or full URL per line (no quotes)
+- Lines starting with `#` are comments
+
+**Example:**
+```
+https://example.com/
+https://google.com/search?q=k6
+https://news.ycombinator.com/
 ```
 
 ## Example k6 script
@@ -141,7 +222,10 @@ export function setup() {
       followRedirects: true,
       acceptGzip: true,
       randomUserAgent: true,
+      randomReferer: true,
+      randomPath: true,
       userAgentListPath: './user_agents.txt',
+      refererListPath: './referer.txt',
       headers: { 'Accept': '*/*' },
     },
     proxy: {
@@ -163,6 +247,9 @@ export default function () {
     http: {
       // Per-request overrides are optional, e.g. custom header
       // headers: { 'X-Debug': '1' },
+      randomUserAgent: true,
+      randomReferer: true,
+      randomPath: true,
     },
     proxy: {
       // You can pin a single proxy just for this request if needed
@@ -183,6 +270,9 @@ export default function () {
 ```
 
 ## Tips
-- Place `proxies.txt` and `user_agents.txt` next to your script or provide absolute paths.
+- Place `proxies.txt`, `user_agents.txt`, and `referer.txt` next to your script or provide absolute paths.
 - If you set `proxy.disable: true`, no proxy will be used even if `url`/`listPath` are present.
+- When `randomUserAgent: true`, `randomReferer: true`, or proxy list rotation is enabled, and no corresponding list path is set explicitly, the module defaults to `./user_agents.txt`, `./referer.txt`, and `./proxies.txt` respectively.
 - When `randomUserAgent: true` and no `User-Agent` header is set explicitly, one is chosen from the loaded list.
+- When `randomReferer: true` and no `Referer` header is set explicitly, one is chosen from the loaded referer list.
+- When `randomPath: true` and the request URL has no path or query, a random path and optional query string will be generated automatically.

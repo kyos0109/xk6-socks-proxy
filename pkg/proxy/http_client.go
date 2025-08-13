@@ -14,25 +14,27 @@ import (
 )
 
 type clientKey struct {
-	Proxy           string
-	Timeout         time.Duration
-	Insecure        bool
-	DisableH2       bool
-	FollowRedirects bool
+	Proxy              string
+	Timeout            time.Duration
+	Insecure           bool
+	DisableH2          bool
+	FollowRedirects    bool
+	DisableCompression bool
 }
 
 func (k clientKey) String() string {
-	return fmt.Sprintf("%s|%s|ik:%t|h2off:%t|redir:%t",
-		k.Proxy, k.Timeout.String(), k.Insecure, k.DisableH2, k.FollowRedirects)
+	return fmt.Sprintf("%s|%s|ik:%t|h2off:%t|redir:%t|nocomp:%t",
+		k.Proxy, k.Timeout.String(), k.Insecure, k.DisableH2, k.FollowRedirects, k.DisableCompression)
 }
 
-func (c *Client) getClient(proxyURL string, timeout time.Duration, insecure, disableH2, followRedirects bool) (*http.Client, error) {
+func (c *Client) getClientWithOpts(proxyURL string, timeout time.Duration, insecure, disableH2, followRedirects, skipDecompress bool) (*http.Client, error) {
 	key := clientKey{
-		Proxy:           proxyURL,
-		Timeout:         timeout,
-		Insecure:        insecure,
-		DisableH2:       disableH2,
-		FollowRedirects: followRedirects,
+		Proxy:              proxyURL,
+		Timeout:            timeout,
+		Insecure:           insecure,
+		DisableH2:          disableH2,
+		FollowRedirects:    followRedirects,
+		DisableCompression: skipDecompress,
 	}
 
 	if v, ok := c.clients.Load(key.String()); ok {
@@ -45,9 +47,12 @@ func (c *Client) getClient(proxyURL string, timeout time.Duration, insecure, dis
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: insecure},
 		DisableKeepAlives:   false,
 		ForceAttemptHTTP2:   !disableH2,
-		MaxIdleConns:        1000,
-		MaxIdleConnsPerHost: 100,
+		MaxIdleConns:        4096,
+		MaxIdleConnsPerHost: 1024,
 		IdleConnTimeout:     90 * time.Second,
+		// SkipDecompress=true => Transport.DisableCompression=true (do not auto-decompress)
+		// SkipDecompress=false => Transport.DisableCompression=false (allow auto-decompress)
+		DisableCompression: skipDecompress,
 	}
 
 	if proxyURL != "" {
@@ -93,4 +98,8 @@ func (c *Client) getClient(proxyURL string, timeout time.Duration, insecure, dis
 
 	c.clients.Store(key.String(), client)
 	return client, nil
+}
+
+func (c *Client) getClient(proxyURL string, timeout time.Duration, insecure, disableH2, followRedirects bool) (*http.Client, error) {
+	return c.getClientWithOpts(proxyURL, timeout, insecure, disableH2, followRedirects, false)
 }

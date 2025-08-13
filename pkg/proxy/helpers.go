@@ -1,9 +1,12 @@
 package proxy
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 )
 
 // asString attempts to convert v to string
@@ -207,4 +210,33 @@ func decodeProxyOptions(m map[string]any, dst *ProxyOptions) {
 			dst.Disable = b
 		}
 	}
+}
+
+func readLines(path string) ([]string, time.Time, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer f.Close()
+
+	s := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	s.Buffer(buf, 10*1024*1024)
+
+	var out []string
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, line)
+	}
+	if err := s.Err(); err != nil {
+		return nil, time.Time{}, err
+	}
+	return out, st.ModTime(), nil
 }

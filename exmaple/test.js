@@ -82,7 +82,18 @@ export default function () {
   const res = socks.request(params);
 
   const ok = check(res, {
-    'status ok or has body': (r) => (r.status >= 200 && r.status < 400) || (r.body && r.body.length > 0),
+      'status ok or has specific JSON field': (r) => {
+          if (r.status >= 200 && r.status < 400) return true;
+          if (!r.body || r.body.length === 0) return false;
+
+          try {
+              const bodyText = String.fromCharCode.apply(null, new Uint8Array(r.body)); // ArrayBuffer → string
+              const jsonData = JSON.parse(bodyText);
+              return jsonData.headers.Referer && jsonData.headers['User-Agent'];
+          } catch (e) {
+              return false;
+          }
+      },
   });
 
   if (!ok && res.error) {
