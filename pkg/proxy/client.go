@@ -164,7 +164,12 @@ type Client struct {
 
 // New returns a new Client instance
 func New() modules.Instance {
-	return &Client{badProxyTTL: 5 * time.Minute}
+	return &Client{
+		badProxyTTL:     5 * time.Minute,
+		uaListPath:      "./user_agents.txt",
+		refererListPath: "./referer.txt",
+		proxyListPath:   "./proxies.txt",
+	}
 }
 
 func (c *Client) parseRequest(raw any) (RequestParams, error) {
@@ -225,6 +230,18 @@ func (c *Client) Request(raw any) (any, error) {
 	if params.Proxy.Disable {
 		params.Proxy.URL = ""
 		params.Proxy.ListPath = ""
+	}
+
+	if params.HTTP.RandomUserAgent && params.HTTP.UserAgentListPath == "" {
+		params.HTTP.UserAgentListPath = c.uaListPath
+	}
+
+	if params.HTTP.RandomReferer && params.HTTP.UserAgentListPath == "" && c.refererListPath != "" {
+		params.HTTP.UserAgentListPath = c.refererListPath
+	}
+
+	if (params.HTTP.RandomPath || params.HTTP.RandomPathWithQuery) && params.Proxy.ListPath == "" {
+		params.Proxy.ListPath = c.proxyListPath
 	}
 
 	if params.Proxy.URL == "" && params.Proxy.ListPath != "" {
