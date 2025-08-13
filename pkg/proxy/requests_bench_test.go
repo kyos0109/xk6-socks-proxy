@@ -172,3 +172,21 @@ func BenchmarkExecuteRequest_FollowRedirects200(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkRandomPath_NoQuery benchmarks GetRandomPath without appending query strings.
+func BenchmarkRandomPath_NoQuery(b *testing.B) {
+	c := &Client{}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = c.GetRandomPath()
+	}
+}
+
+// BenchmarkRandomPath_WithQuery benchmarks GetRandomPathWithQuery which generates a random path and appends a random query string.
+func BenchmarkRandomPath_WithQuery(b *testing.B) {
+	c := &Client{}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = c.GetRandomPathWithQuery()
+	}
+}
