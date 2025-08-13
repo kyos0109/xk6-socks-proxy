@@ -1,4 +1,4 @@
-import proxy from 'k6/x/socks-proxy';
+import proxy from 'k6/x/xk6-socks-proxy';
 import { sleep } from 'k6';
 
 // Environment variable flags
